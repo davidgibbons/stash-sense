@@ -20,6 +20,7 @@ from duplicate_detection import (
     FaceAppearance,
     calculate_duplicate_confidence,
 )
+from duplicate_detection.scoring import hamming_distance
 
 if TYPE_CHECKING:
     from stash_client_unified import StashClientUnified
@@ -72,11 +73,11 @@ class DuplicateScenesAnalyzer(BaseAnalyzer):
         super().__init__(stash, rec_db, **kwargs)
         self.min_confidence = min_confidence
         self.batch_size = batch_size
-        # NOTE: _phash_distances is populated during _generate_candidates() and consumed
+        # NOTE: _phashes is populated during _generate_candidates() and consumed
         # during _score_candidates(). It is only in memory — not persisted to SQLite.
         # This works because both phases run in the same run() call. If the analyzer
-        # crashes between phases, candidates are persisted but distances must be regenerated.
-        self._phash_distances: dict[tuple[int, int], int] = {}
+        # crashes between phases, candidates are persisted but phashes must be reloaded.
+        self._phashes: dict[int, str] = {}
 
     async def run(self, incremental: bool = True) -> DuplicateScenesResult:
         """
@@ -131,7 +132,7 @@ class DuplicateScenesAnalyzer(BaseAnalyzer):
         # is an ephemeral work queue — old candidates block new inserts due to
         # UNIQUE(scene_a_id, scene_b_id) constraint (which doesn't include run_id).
         self.rec_db.clear_all_candidates()
-        self._phash_distances = {}
+        self._phashes = {}
 
         # Source A: Stash-box IDs + Source B: Phash fingerprints
         # (single pass over paginated scenes with fingerprints)
@@ -184,13 +185,12 @@ class DuplicateScenesAnalyzer(BaseAnalyzer):
 
         # Source B: Phash candidates (Hamming distance)
         if phash_list:
+            self._phashes = dict(phash_list)
             stored = self.rec_db.store_scene_phashes(phash_list)
             phash_triples = self.rec_db.generate_phash_candidates(max_distance=10)
             if phash_triples:
                 phash_pairs = []
-                for a, b, dist in phash_triples:
-                    pair_key = (min(a, b), max(a, b))
-                    self._phash_distances[pair_key] = dist
+                for a, b, _dist in phash_triples:
                     phash_pairs.append((a, b, "phash"))
                 self.rec_db.insert_candidates_batch(phash_pairs, run_id)
                 logger.warning(f"  Phash: {len(phash_pairs)} candidates ({self.rec_db.count_candidates(run_id)} after dedup)")
@@ -299,10 +299,11 @@ class DuplicateScenesAnalyzer(BaseAnalyzer):
                 fp_a = fingerprints.get(str(candidate["scene_a_id"]))
                 fp_b = fingerprints.get(str(candidate["scene_b_id"]))
 
-                # Look up phash distance for this pair
-                pair_key = (min(candidate["scene_a_id"], candidate["scene_b_id"]),
-                            max(candidate["scene_a_id"], candidate["scene_b_id"]))
-                phash_dist = self._phash_distances.get(pair_key)
+                # Every pair gets a distance, so a far one can veto metadata-only matches
+                phash_dist = hamming_distance(
+                    self._phashes.get(candidate["scene_a_id"]),
+                    self._phashes.get(candidate["scene_b_id"]),
+                )
 
                 match = calculate_duplicate_confidence(scene_a, scene_b, fp_a, fp_b, phash_distance=phash_dist)
 

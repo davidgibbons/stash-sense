@@ -11,6 +11,9 @@ from .models import (
     DuplicateMatch,
 )
 
+# Unrelated videos average ~32 differing bits; past this, the two share no footage.
+PHASH_VETO_DISTANCE = 20
+
 
 @dataclass
 class StashboxMatchResult:
@@ -32,6 +35,13 @@ def check_stashbox_match(scene_a: SceneMetadata, scene_b: SceneMetadata) -> Stas
                     stash_id=sid_a.stash_id,
                 )
     return StashboxMatchResult(matched=False)
+
+
+def has_stashbox_conflict(scene_a: SceneMetadata, scene_b: SceneMetadata) -> bool:
+    """True when both scenes are linked on a shared endpoint, but to different IDs."""
+    endpoints_a = {s.endpoint for s in scene_a.stash_ids}
+    endpoints_b = {s.endpoint for s in scene_b.stash_ids}
+    return bool(endpoints_a & endpoints_b) and not check_stashbox_match(scene_a, scene_b).matched
 
 
 def _jaccard_similarity(set_a: set, set_b: set) -> float:
@@ -224,6 +234,12 @@ def calculate_duplicate_confidence(
                 metadata_reasoning="",
             ),
         )
+
+    # Hard vetoes: either one proves the scenes are different, whatever metadata says.
+    if has_stashbox_conflict(scene_a, scene_b):
+        return None
+    if phash_distance is not None and phash_distance > PHASH_VETO_DISTANCE:
+        return None
 
     # Compute individual signals
     p_score, p_reasoning = phash_score(phash_distance)

@@ -438,3 +438,34 @@ class TestCombinedConfidenceRedesign:
         match = calculate_duplicate_confidence(a, b, phash_distance=2)
         assert match is not None
         assert match.signal_breakdown.phash_distance == 2
+
+
+class TestVetoes:
+    """Evidence that proves two scenes differ overrides any metadata similarity."""
+
+    def _scene(self, scene_id, stash_id=None):
+        from duplicate_detection.models import SceneMetadata, StashID
+
+        return SceneMetadata(
+            scene_id=scene_id,
+            studio_id="s1",
+            performer_ids={"p1"},
+            date="2021-09-06",
+            stash_ids=[StashID(endpoint="https://stashdb.org/graphql", stash_id=stash_id)] if stash_id else [],
+        )
+
+    def test_metadata_alone_still_matches(self):
+        from duplicate_detection.scoring import calculate_duplicate_confidence
+
+        assert calculate_duplicate_confidence(self._scene("1"), self._scene("2")) is not None
+
+    def test_different_stashbox_ids_on_same_endpoint_veto(self):
+        from duplicate_detection.scoring import calculate_duplicate_confidence
+
+        assert calculate_duplicate_confidence(self._scene("1", "abc"), self._scene("2", "def")) is None
+
+    def test_far_phash_vetoes(self):
+        from duplicate_detection.scoring import calculate_duplicate_confidence
+
+        assert calculate_duplicate_confidence(self._scene("1"), self._scene("2"), phash_distance=21) is None
+        assert calculate_duplicate_confidence(self._scene("1"), self._scene("2"), phash_distance=20) is not None
