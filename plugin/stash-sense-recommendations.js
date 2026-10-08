@@ -817,6 +817,10 @@
             ? '<button class="ss-accept-all-btn" id="ss-accept-all-fp-btn">Accept All High-Confidence</button>'
             : ''
           }
+          ${currentState.type === 'duplicate_scene_files'
+            ? '<button class="ss-accept-all-btn" id="ss-delete-all-files-btn">Keep Suggested, Delete Rest</button>'
+            : ''
+          }
           <button class="ss-dismiss-all-btn" id="ss-dismiss-all-btn">Dismiss All</button>
         </div>
         ` : ''}
@@ -917,6 +921,72 @@
           acceptAllFpBtn.classList.add('ss-btn-error');
           acceptAllFpBtn.disabled = false;
         }
+      });
+    }
+
+    // Keep Suggested, Delete Rest: applies each recommendation's suggested keeper
+    const deleteAllFilesBtn = container.querySelector('#ss-delete-all-files-btn');
+    if (deleteAllFilesBtn) {
+      deleteAllFilesBtn.addEventListener('click', async () => {
+        deleteAllFilesBtn.disabled = true;
+        deleteAllFilesBtn.textContent = 'Loading...';
+        let recs;
+        try {
+          recs = (await RecommendationsAPI.getList({
+            type: 'duplicate_scene_files', status: 'pending', limit: 10000, offset: 0,
+          })).recommendations;
+        } catch (e) {
+          deleteAllFilesBtn.textContent = `Failed: ${e.message}`;
+          deleteAllFilesBtn.disabled = false;
+          return;
+        }
+        if (recs.length === 0) {
+          deleteAllFilesBtn.textContent = 'Nothing to delete';
+          return;
+        }
+        const fileCount = recs.reduce((n, r) => n + r.details.files.length - 1, 0);
+        const savings = recs.reduce((n, r) => n + (r.details.potential_savings || 0), 0);
+        const resetBtn = () => {
+          deleteAllFilesBtn.textContent = 'Keep Suggested, Delete Rest';
+          deleteAllFilesBtn.disabled = false;
+        };
+
+        showConfirmModal(
+          `Delete ${fileCount} file(s) across ${recs.length} scene(s), freeing up to ${(savings / 1e9).toFixed(1)} GB? ` +
+          'Each scene keeps its suggested file. This cannot be undone.',
+          async () => {
+            let done = 0;
+            const failed = [];
+            for (const rec of recs) {
+              deleteAllFilesBtn.textContent = `Deleting ${done + failed.length + 1} / ${recs.length}...`;
+              const keeperId = rec.details.suggested_keeper_id;
+              const allFileIds = rec.details.files.map(f => f.id);
+              const fileIdsToDelete = allFileIds.filter(id => id !== keeperId);
+              try {
+                try {
+                  await RecommendationsAPI.deleteSceneFiles(rec.target_id, fileIdsToDelete, keeperId, allFileIds);
+                } catch (e) {
+                  // Files already gone still count: resolve the recommendation below.
+                  if (!/no rows in result set|not found/.test(e.message || '')) throw e;
+                }
+                await RecommendationsAPI.resolve(rec.id, 'deleted', {
+                  kept_file_id: keeperId,
+                  deleted_file_ids: fileIdsToDelete,
+                  batch: true,
+                });
+                done++;
+              } catch (e) {
+                failed.push(rec);
+              }
+            }
+            deleteAllFilesBtn.textContent = failed.length
+              ? `${done} deleted, ${failed.length} failed`
+              : `Done! ${done} deleted`;
+            deleteAllFilesBtn.classList.add(failed.length ? 'ss-btn-error' : 'ss-btn-success');
+            setTimeout(() => renderCurrentView(document.getElementById('ss-recommendations')), 2000);
+          },
+          { onCancel: resetBtn }
+        );
       });
     }
 
@@ -1776,7 +1846,7 @@
   // ==================== Confirmation Modal ====================
 
   function showConfirmModal(message, onConfirm, options = {}) {
-    const { showDontAsk = false, storageKey = null } = options;
+    const { showDontAsk = false, storageKey = null, onCancel = null } = options;
 
     // Check "don't ask again"
     if (storageKey && localStorage.getItem(`ss-skip-confirm-${storageKey}`) === '1') {
@@ -1834,16 +1904,19 @@
       onConfirm();
     });
 
-    cancelBtn.addEventListener('click', () => {
+    const cancel = () => {
       closeOverlay();
-    });
+      if (onCancel) onCancel();
+    };
+
+    cancelBtn.addEventListener('click', cancel);
 
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) closeOverlay();
+      if (e.target === overlay) cancel();
     });
 
     const escHandler = (e) => {
-      if (e.key === 'Escape') closeOverlay();
+      if (e.key === 'Escape') cancel();
     };
 
     function closeOverlay() {

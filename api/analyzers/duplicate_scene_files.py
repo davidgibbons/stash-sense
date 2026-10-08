@@ -7,7 +7,12 @@ to choose which file(s) to keep and delete the rest.
 Ported from: stash-plugins/scripts/scene-file-deduper/
 """
 
+import os
+
 from .base import BaseAnalyzer, AnalysisResult
+
+# On a quality tie, keep the file under this path, such as the tree a *arr app tracks.
+KEEP_PATH_PREFIX = os.environ.get("DUPLICATE_FILES_KEEP_PREFIX", "")
 
 
 def format_size(size_bytes: int) -> str:
@@ -75,6 +80,13 @@ class DuplicateSceneFilesAnalyzer(BaseAnalyzer):
         Note: Incremental mode isn't well-supported here since we need
         to check all multi-file scenes. Always runs full scan.
         """
+        # Pending rows are never updated in place, so drop them to refresh keepers.
+        # Dismissed rows survive, and is_dismissed() keeps them from returning.
+        with self.rec_db._connection() as conn:
+            conn.execute(
+                "DELETE FROM recommendations WHERE type = 'duplicate_scene_files' AND status = 'pending'"
+            )
+
         # Fetch all scenes with more than one file
         scenes = await self.stash.get_multi_file_scenes()
 
@@ -107,7 +119,13 @@ class DuplicateSceneFilesAnalyzer(BaseAnalyzer):
                 })
 
             # Sort by quality score descending (best first)
-            scored_files.sort(key=lambda x: x["quality_score"], reverse=True)
+            scored_files.sort(
+                key=lambda x: (
+                    x["quality_score"],
+                    bool(KEEP_PATH_PREFIX) and x["path"].startswith(KEEP_PATH_PREFIX),
+                ),
+                reverse=True,
+            )
 
             # Mark suggested keeper
             for i, f in enumerate(scored_files):
