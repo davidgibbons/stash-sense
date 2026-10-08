@@ -1023,13 +1023,17 @@ class StashClientUnified:
         return data.get("findScene")
 
     async def merge_scenes(
-        self, source_ids: list[str], destination_id: str,
+        self, source_ids: list[str], destination_id: str, delete_source_files: bool = False,
     ) -> dict:
-        """Merge source scenes into destination scene via Stash's sceneMerge mutation."""
+        """Merge source scenes into the destination, files and metadata both.
+
+        sceneMerge moves only files, markers and history unless `values` carries the metadata."""
+        dest = await self._get_scene_merge_fields(destination_id)
+        sources = [await self._get_scene_merge_fields(sid) for sid in source_ids]
         query = """
         mutation SceneMerge($input: SceneMergeInput!) {
           sceneMerge(input: $input) {
-            count
+            id
           }
         }
         """
@@ -1037,12 +1041,37 @@ class StashClientUnified:
             "input": {
                 "source": source_ids,
                 "destination": destination_id,
+                "values": {"id": destination_id, **merged_scene_values(dest, sources)},
                 "play_history": True,
                 "o_history": True,
             }
         }
-        data = await self._execute(query, variables)
+        data = await self._execute(query, variables, priority=Priority.CRITICAL)
+        if delete_source_files:
+            file_ids = [f["id"] for s in sources for f in s["files"]]
+            if file_ids:
+                await self.delete_files(file_ids)
         return data.get("sceneMerge", {})
+
+    async def _get_scene_merge_fields(self, scene_id: str) -> dict:
+        query = """
+        query SceneMergeFields($id: ID!) {
+          findScene(id: $id) {
+            title code details director date rating100 organized urls
+            studio { id }
+            performers { id }
+            tags { id }
+            galleries { id }
+            groups { group { id } scene_index }
+            stash_ids { endpoint stash_id }
+            files { id }
+          }
+        }
+        """
+        data = await self._execute(query, {"id": scene_id})
+        if not data.get("findScene"):
+            raise ValueError(f"Scene {scene_id} not found")
+        return data["findScene"]
 
     async def destroy_scene(
         self, scene_id: str, delete_file: bool = False, delete_generated: bool = True,
@@ -1140,3 +1169,39 @@ class StashClientUnified:
         )
         gallery["images"] = images_data.get("findImages", {}).get("images", [])
         return gallery
+
+
+def merged_scene_values(dest: dict, sources: list[dict]) -> dict:
+    """Union the scenes' lists; scalars and per-endpoint stash IDs take dest's value when set."""
+    scenes = [dest, *sources]
+    values: dict = {}
+
+    for field in ("title", "code", "details", "director", "date", "rating100"):
+        value = next((s[field] for s in scenes if s.get(field)), None)
+        if value is not None:
+            values[field] = value
+    studio = next((s["studio"] for s in scenes if s.get("studio")), None)
+    if studio:
+        values["studio_id"] = studio["id"]
+    values["organized"] = any(s.get("organized") for s in scenes)
+
+    def union(items):
+        return list(dict.fromkeys(items))
+
+    values["urls"] = union(u for s in scenes for u in s.get("urls") or [])
+    for field, key in (("performers", "performer_ids"), ("tags", "tag_ids"), ("galleries", "gallery_ids")):
+        values[key] = union(x["id"] for s in scenes for x in s.get(field) or [])
+
+    groups: dict = {}
+    for s in scenes:
+        for g in s.get("groups") or []:
+            groups.setdefault(g["group"]["id"], g.get("scene_index"))
+    values["groups"] = [{"group_id": gid, "scene_index": idx} for gid, idx in groups.items()]
+
+    stash_ids: dict = {}
+    for s in scenes:
+        for sid in s.get("stash_ids") or []:
+            stash_ids.setdefault(sid["endpoint"], sid["stash_id"])
+    values["stash_ids"] = [{"endpoint": e, "stash_id": i} for e, i in stash_ids.items()]
+
+    return values

@@ -448,11 +448,12 @@ def rec_delete_files(sidecar_url, scene_id, file_ids_to_delete, keep_file_id, al
     return sidecar_post(sidecar_url, "/recommendations/actions/delete-scene-files", data, timeout=120)
 
 
-def rec_merge_scenes(sidecar_url, destination_id, source_ids):
+def rec_merge_scenes(sidecar_url, destination_id, source_ids, delete_source_files=False):
     """Execute scene merge."""
     data = {
         "destination_id": destination_id,
         "source_ids": source_ids,
+        "delete_source_files": delete_source_files,
     }
     return sidecar_post(sidecar_url, "/recommendations/actions/merge-scenes", data, timeout=120)
 
@@ -582,7 +583,8 @@ def handle_recommendations(mode, args, sidecar_url):
         source_ids = args.get("source_ids", [])
         if not destination_id or not source_ids:
             return {"error": "destination_id and source_ids required"}
-        return rec_merge_scenes(sidecar_url, destination_id, source_ids)
+        delete_source_files = args.get("delete_source_files", False)
+        return rec_merge_scenes(sidecar_url, destination_id, source_ids, delete_source_files)
 
     elif mode == "rec_delete_scene":
         scene_id = args.get("scene_id")

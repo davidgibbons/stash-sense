@@ -116,10 +116,11 @@
       });
     },
 
-    async mergeScenes(destinationId, sourceIds) {
+    async mergeScenes(destinationId, sourceIds, deleteSourceFiles = false) {
       return apiCall('rec_merge_scenes', {
         destination_id: destinationId,
         source_ids: sourceIds,
+        delete_source_files: deleteSourceFiles,
       });
     },
 
@@ -1784,12 +1785,12 @@
         var deleteId = btn.getAttribute('data-delete');
         var keepId = btn.getAttribute('data-keep');
         showConfirmModal(
-          'Delete "' + escapeHtml(sceneTitles[deleteId]) + '"? The scene and its file will be permanently deleted from disk. This cannot be undone.',
+          'Delete "' + escapeHtml(sceneTitles[deleteId]) + '"? Its tags, performers, stash IDs and other metadata are merged into "' + escapeHtml(sceneTitles[keepId]) + '" first, then its file is deleted from disk. This cannot be undone.',
           async function() {
             try {
               disableAllDupActions();
               btn.textContent = 'Deleting...';
-              await RecommendationsAPI.deleteScene(deleteId, false);
+              await RecommendationsAPI.mergeScenes(keepId, [deleteId], true);
               await RecommendationsAPI.resolve(rec.id, 'deleted', { deleted_scene_id: deleteId, kept_scene_id: keepId });
               showSuccessAndReturn(btn, 'Deleted!');
             } catch (e) {

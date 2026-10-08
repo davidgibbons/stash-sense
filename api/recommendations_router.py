@@ -574,14 +574,17 @@ class MergeScenesRequest(BaseModel):
     """Request to merge duplicate scenes."""
     destination_id: str
     source_ids: list[str]
+    delete_source_files: bool = False
 
 
 @router.post("/actions/merge-scenes")
 async def merge_scenes(request: MergeScenesRequest):
-    """Execute a scene merge via Stash's sceneMerge mutation."""
+    """Merge scenes' files and metadata into the destination, optionally deleting the sources' files."""
     stash = get_stash_client()
     try:
-        result = await stash.merge_scenes(request.source_ids, request.destination_id)
+        result = await stash.merge_scenes(
+            request.source_ids, request.destination_id, request.delete_source_files,
+        )
         return {"success": True, "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
