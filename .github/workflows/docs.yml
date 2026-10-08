@@ -3,6 +3,8 @@ name: Deploy Documentation & Plugin Index
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths: ["plugin/**", "docs/**", "mkdocs.yml"]
   workflow_dispatch:
 
 permissions:
