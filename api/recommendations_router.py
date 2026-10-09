@@ -594,6 +594,8 @@ async def merge_scenes(request: MergeScenesRequest):
         result = await stash.merge_scenes(
             request.source_ids, request.destination_id, request.delete_source_files,
         )
+        # The source scenes no longer exist, so every other pair naming them is moot.
+        get_rec_db().resolve_pending_scene_pairs(request.source_ids, "scene_merged")
         return {"success": True, "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

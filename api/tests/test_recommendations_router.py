@@ -363,3 +363,11 @@ class TestBatchDismiss:
         )
         assert resp.status_code == 200
         assert resp.json()["dismissed_count"] == 2
+
+
+def test_resolve_pending_scene_pairs_matches_either_side(db):
+    for target in ("1:2", "2:3", "3:4", "12:5"):
+        db.create_recommendation(type="duplicate_scenes", target_type="scene",
+                                 target_id=target, details={}, confidence=0.9)
+    assert db.resolve_pending_scene_pairs(["2"], "scene_merged") == 2
+    assert db.count_recommendations(status="pending") == 2

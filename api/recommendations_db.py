@@ -651,6 +651,26 @@ class RecommendationsDB:
             )
             return cursor.rowcount > 0
 
+    def resolve_pending_scene_pairs(self, scene_ids: list[str], action: str) -> int:
+        """Resolve pending duplicate_scenes pairs that include any of scene_ids.
+
+        Pair target_ids are "<scene_a_id>:<scene_b_id>". Returns count resolved.
+        """
+        resolved = 0
+        with self._connection() as conn:
+            for sid in scene_ids:
+                resolved += conn.execute(
+                    """
+                    UPDATE recommendations
+                    SET status = 'resolved', resolution_action = ?,
+                        resolved_at = datetime('now'), updated_at = datetime('now')
+                    WHERE type = 'duplicate_scenes' AND status = 'pending'
+                      AND (target_id LIKE ? || ':%' OR target_id LIKE '%:' || ?)
+                    """,
+                    (action, str(sid), str(sid)),
+                ).rowcount
+        return resolved
+
     def dismiss_recommendation(self, rec_id: int, reason: Optional[str] = None, permanent: bool = False) -> bool:
         """Dismiss a recommendation and add to dismissed_targets."""
         with self._connection() as conn:

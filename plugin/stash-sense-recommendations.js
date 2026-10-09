@@ -1726,6 +1726,12 @@
         RecommendationsAPI.getSceneDetail(sceneBId),
       ]);
     } catch (e) {
+      // A scene merged or deleted since analysis leaves nothing to review.
+      if (/not found|does not exist/i.test(e.message || '')) {
+        await RecommendationsAPI.resolve(rec.id, 'scene_missing').catch(function() {});
+        container.innerHTML = '<div class="ss-empty-state"><p>One of these scenes no longer exists, so this pair has been resolved.</p></div>';
+        return;
+      }
       container.innerHTML = '<div class="ss-error-state"><p>Failed to load scenes: ' + e.message + '</p></div>';
       return;
     }
