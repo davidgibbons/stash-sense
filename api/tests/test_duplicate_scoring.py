@@ -469,3 +469,12 @@ class TestVetoes:
 
         assert calculate_duplicate_confidence(self._scene("1"), self._scene("2"), phash_distance=21) is None
         assert calculate_duplicate_confidence(self._scene("1"), self._scene("2"), phash_distance=20) is not None
+
+    def test_shared_stashbox_id_with_far_phash_is_flagged_not_certain(self):
+        from duplicate_detection.scoring import calculate_duplicate_confidence
+
+        far = calculate_duplicate_confidence(self._scene("1", "abc"), self._scene("2", "abc"), phash_distance=26)
+        assert far.confidence == 50.0
+        assert "mis-tagged" in far.reasoning[0]
+        near = calculate_duplicate_confidence(self._scene("1", "abc"), self._scene("2", "abc"), phash_distance=3)
+        assert near.confidence == 100.0

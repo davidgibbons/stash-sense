@@ -219,15 +219,22 @@ def calculate_duplicate_confidence(
     # Tier 1: Stash-box ID match
     stashbox = check_stashbox_match(scene_a, scene_b)
     if stashbox.matched:
+        # A shared ID on two different videos means one scene is mis-tagged, not duplicated.
+        mistagged = phash_distance is not None and phash_distance > PHASH_VETO_DISTANCE
+        reasoning = (
+            f"Same stash-box ID {stashbox.stash_id} but different video "
+            f"(phash distance {phash_distance}): one scene is probably mis-tagged"
+            if mistagged else f"Identical stash-box ID: {stashbox.stash_id}"
+        )
         return DuplicateMatch(
             scene_a_id=int(scene_a.scene_id),
             scene_b_id=int(scene_b.scene_id),
-            confidence=100.0,
-            reasoning=[f"Identical stash-box ID: {stashbox.stash_id}"],
+            confidence=50.0 if mistagged else 100.0,
+            reasoning=[reasoning],
             signal_breakdown=SignalBreakdown(
                 stashbox_match=True,
                 stashbox_endpoint=stashbox.endpoint,
-                phash_distance=None,
+                phash_distance=phash_distance,
                 face_score=0.0,
                 face_reasoning="",
                 metadata_score=0.0,
