@@ -4,6 +4,7 @@
 Proxies requests to the Stash Sense sidecar API to bypass browser CSP restrictions.
 """
 import json
+import urllib.parse
 import sys
 import requests
 
@@ -372,17 +373,20 @@ def rec_counts(sidecar_url):
     return sidecar_get(sidecar_url, "/recommendations/counts")
 
 
-def rec_list(sidecar_url, status=None, rec_type=None, limit=100, offset=0):
+def rec_list(sidecar_url, status=None, rec_type=None, limit=100, offset=0,
+             min_confidence=None, max_confidence=None, sort=None):
     """List recommendations."""
-    params = []
-    if status:
-        params.append(f"status={status}")
-    if rec_type:
-        params.append(f"type={rec_type}")
-    params.append(f"limit={limit}")
-    params.append(f"offset={offset}")
-    query = "?" + "&".join(params) if params else ""
-    return sidecar_get(sidecar_url, f"/recommendations{query}")
+    params = {
+        "status": status,
+        "type": rec_type,
+        "limit": limit,
+        "offset": offset,
+        "min_confidence": min_confidence,
+        "max_confidence": max_confidence,
+        "sort": sort,
+    }
+    query = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
+    return sidecar_get(sidecar_url, f"/recommendations?{query}")
 
 
 def rec_get(sidecar_url, rec_id):
@@ -513,6 +517,9 @@ def handle_recommendations(mode, args, sidecar_url):
             rec_type=args.get("type"),
             limit=int(args.get("limit", 100)),
             offset=int(args.get("offset", 0)),
+            min_confidence=args.get("min_confidence"),
+            max_confidence=args.get("max_confidence"),
+            sort=args.get("sort"),
         )
 
     elif mode == "rec_get":
@@ -541,6 +548,8 @@ def handle_recommendations(mode, args, sidecar_url):
         return sidecar_post(sidecar_url, "/recommendations/actions/batch-dismiss", {
             "type": rec_type,
             "permanent": args.get("permanent", False),
+            "min_confidence": args.get("min_confidence"),
+            "max_confidence": args.get("max_confidence"),
         })
 
     elif mode == "rec_analysis_types":

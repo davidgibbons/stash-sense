@@ -37,6 +37,8 @@
         type: params.type,
         limit: params.limit || 100,
         offset: params.offset || 0,
+        ...confidenceRange(params.confBand),
+        sort: params.sort,
       });
     },
 
@@ -174,8 +176,8 @@
       return apiCall('rec_dismiss_upstream', { rec_id: recId, reason, permanent: !!permanent });
     },
 
-    async batchDismiss(type, permanent) {
-      return apiCall('rec_batch_dismiss', { type, permanent: !!permanent });
+    async batchDismiss(type, permanent, confBand) {
+      return apiCall('rec_batch_dismiss', { type, permanent: !!permanent, ...confidenceRange(confBand) });
     },
 
     async searchEntities(entityType, query, endpoint) {
@@ -320,7 +322,25 @@
     page: 0,
     selectedRec: null,
     counts: null,
+    confBand: 'all',
+    sort: 'newest',
   };
+
+  // Only these types score confidence per recommendation; every other analyzer stores 1.0.
+  const CONFIDENCE_TYPES = new Set(['duplicate_scenes', 'scene_fingerprint_match']);
+
+  // Bands match the green/yellow/grey confidence colours on the cards.
+  const CONFIDENCE_BANDS = {
+    all: { label: 'All' },
+    high: { label: 'High (80%+)', min: 0.8 },
+    medium: { label: 'Medium (60-79%)', min: 0.6, max: 0.8 },
+    low: { label: 'Low (<60%)', max: 0.6 },
+  };
+
+  function confidenceRange(band) {
+    const b = CONFIDENCE_BANDS[band] || {};
+    return { min_confidence: b.min, max_confidence: b.max };
+  }
 
   // (Polling for analysis/fingerprint progress now handled by Operations tab)
 
@@ -548,6 +568,9 @@
         card.querySelector('button').addEventListener('click', () => {
           currentState.type = type;
           currentState.view = 'list';
+          currentState.page = 0;
+          currentState.confBand = 'all';
+          currentState.sort = 'newest';
           renderCurrentView(mainContainer);
         });
 
@@ -808,6 +831,19 @@
             Dismissed
           </button>
         </div>
+        ${CONFIDENCE_TYPES.has(currentState.type) ? `
+        <div class="ss-list-actions">
+          <select class="ss-select" id="ss-conf-band" title="Filter by confidence">
+            ${Object.entries(CONFIDENCE_BANDS).map(([k, b]) =>
+              `<option value="${k}" ${currentState.confBand === k ? 'selected' : ''}>Confidence: ${b.label}</option>`).join('')}
+          </select>
+          <select class="ss-select" id="ss-sort" title="Sort order">
+            <option value="newest" ${currentState.sort === 'newest' ? 'selected' : ''}>Newest first</option>
+            <option value="confidence_desc" ${currentState.sort === 'confidence_desc' ? 'selected' : ''}>Highest confidence</option>
+            <option value="confidence_asc" ${currentState.sort === 'confidence_asc' ? 'selected' : ''}>Lowest confidence</option>
+          </select>
+        </div>
+        ` : ''}
         ${currentState.status === 'pending' ? `
         <div class="ss-list-actions">
           ${currentState.type === 'upstream_performer_changes' || currentState.type === 'upstream_tag_changes' || currentState.type === 'upstream_studio_changes'
@@ -849,6 +885,17 @@
         renderCurrentView(container);
       });
     });
+
+    // Confidence filter and sort (confidence-scored types only)
+    for (const [id, key] of [['#ss-conf-band', 'confBand'], ['#ss-sort', 'sort']]) {
+      const select = container.querySelector(id);
+      if (!select) continue;
+      select.addEventListener('change', () => {
+        currentState[key] = select.value;
+        currentState.page = 0;
+        renderCurrentView(container);
+      });
+    }
 
     // Accept All Changes button
     const acceptAllBtn = container.querySelector('#ss-accept-all-btn');
@@ -996,12 +1043,14 @@
     if (dismissAllBtn) {
       dismissAllBtn.addEventListener('click', async () => {
         // Show confirmation modal with permanent/temporary options
+        const band = CONFIDENCE_TYPES.has(currentState.type) ? currentState.confBand : 'all';
+        const bandNote = band === 'all' ? '' : ` with ${CONFIDENCE_BANDS[band].label.toLowerCase()} confidence`;
         const overlay = document.createElement('div');
         overlay.className = 'ss-modal-overlay';
         overlay.innerHTML = `
           <div class="ss-modal" style="max-width:420px;">
             <h3>Dismiss All</h3>
-            <p style="margin:0.75rem 0;color:#aaa;">How would you like to dismiss all pending ${typeConfigs[currentState.type] || currentState.type} recommendations?</p>
+            <p style="margin:0.75rem 0;color:#aaa;">How would you like to dismiss all pending ${typeConfigs[currentState.type] || currentState.type} recommendations${bandNote}?</p>
             <div style="display:flex;flex-direction:column;gap:0.5rem;margin-top:1rem;">
               <button class="ss-btn ss-btn-secondary" id="ss-dismiss-temp">Dismiss until next analysis</button>
               <button class="ss-btn ss-btn-danger" id="ss-dismiss-perm">Never show again</button>
@@ -1014,7 +1063,7 @@
         const handleDismiss = async (permanent) => {
           overlay.querySelector('.ss-modal').innerHTML = '<div class="ss-loading-inline"><div class="ss-spinner"></div></div><p style="text-align:center;margin-top:0.5rem;">Dismissing...</p>';
           try {
-            const result = await RecommendationsAPI.batchDismiss(currentState.type, permanent);
+            const result = await RecommendationsAPI.batchDismiss(currentState.type, permanent, band);
             overlay.remove();
             dismissAllBtn.textContent = `Dismissed ${result.dismissed_count}!`;
             dismissAllBtn.disabled = true;
@@ -1044,6 +1093,8 @@
           status: currentState.status,
           limit: PAGE_SIZE,
           offset: currentState.page * PAGE_SIZE,
+          confBand: CONFIDENCE_TYPES.has(currentState.type) ? currentState.confBand : 'all',
+          sort: CONFIDENCE_TYPES.has(currentState.type) ? currentState.sort : 'newest',
         }),
         RecommendationsAPI.getCounts(),
       ]);

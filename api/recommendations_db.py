@@ -537,6 +537,35 @@ class RecommendationsDB:
                 return self._row_to_recommendation(row)
         return None
 
+    # Sort keys accepted by get_recommendations; confidence ties fall back to newest.
+    SORT_ORDERS = {
+        "newest": "created_at DESC",
+        "confidence_desc": "confidence DESC, created_at DESC",
+        "confidence_asc": "confidence ASC, created_at DESC",
+    }
+
+    @staticmethod
+    def _rec_filter(status=None, type=None, target_type=None,
+                    min_confidence=None, max_confidence=None) -> tuple[str, list]:
+        """WHERE clause shared by listing, counting, and batch dismissal.
+
+        min_confidence is inclusive and max_confidence exclusive, so adjacent
+        bands never overlap.
+        """
+        where = " WHERE 1=1"
+        params: list = []
+        for clause, value in (
+            ("status = ?", status),
+            ("type = ?", type),
+            ("target_type = ?", target_type),
+            ("confidence >= ?", min_confidence),
+            ("confidence < ?", max_confidence),
+        ):
+            if value is not None and value != "":
+                where += f" AND {clause}"
+                params.append(value)
+        return where, params
+
     def get_recommendations(
         self,
         status: Optional[str] = None,
@@ -544,43 +573,26 @@ class RecommendationsDB:
         target_type: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        min_confidence: Optional[float] = None,
+        max_confidence: Optional[float] = None,
+        sort: str = "newest",
     ) -> list[Recommendation]:
         """Get recommendations with optional filtering."""
-        query = "SELECT * FROM recommendations WHERE 1=1"
-        params = []
-
-        if status:
-            query += " AND status = ?"
-            params.append(status)
-        if type:
-            query += " AND type = ?"
-            params.append(type)
-        if target_type:
-            query += " AND target_type = ?"
-            params.append(target_type)
-
-        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        where, params = self._rec_filter(status, type, target_type, min_confidence, max_confidence)
+        order = self.SORT_ORDERS.get(sort, self.SORT_ORDERS["newest"])
+        query = f"SELECT * FROM recommendations{where} ORDER BY {order} LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         with self._connection() as conn:
             rows = conn.execute(query, params).fetchall()
             return [self._row_to_recommendation(row) for row in rows]
 
-    def count_recommendations(self, status=None, type=None, target_type=None) -> int:
+    def count_recommendations(self, status=None, type=None, target_type=None,
+                              min_confidence=None, max_confidence=None) -> int:
         """Count recommendations with optional filtering (for pagination totals)."""
-        query = "SELECT COUNT(*) FROM recommendations WHERE 1=1"
-        params = []
-        if status:
-            query += " AND status = ?"
-            params.append(status)
-        if type:
-            query += " AND type = ?"
-            params.append(type)
-        if target_type:
-            query += " AND target_type = ?"
-            params.append(target_type)
+        where, params = self._rec_filter(status, type, target_type, min_confidence, max_confidence)
         with self._connection() as conn:
-            return conn.execute(query, params).fetchone()[0]
+            return conn.execute(f"SELECT COUNT(*) FROM recommendations{where}", params).fetchone()[0]
 
     def get_recommendation_by_target(
         self,
@@ -675,13 +687,17 @@ class RecommendationsDB:
 
             return True
 
-    def batch_dismiss_by_type(self, rec_type: str, permanent: bool = False, reason: Optional[str] = None) -> int:
-        """Dismiss all pending recommendations of a given type. Returns count dismissed."""
+    def batch_dismiss_by_type(self, rec_type: str, permanent: bool = False, reason: Optional[str] = None,
+                              min_confidence: Optional[float] = None,
+                              max_confidence: Optional[float] = None) -> int:
+        """Dismiss pending recommendations of a type, optionally within a confidence band.
+
+        Returns count dismissed.
+        """
+        where, params = self._rec_filter("pending", rec_type, None, min_confidence, max_confidence)
         with self._connection() as conn:
-            # Get all pending recs of this type
             rows = conn.execute(
-                "SELECT id, type, target_type, target_id FROM recommendations WHERE type = ? AND status = 'pending'",
-                (rec_type,)
+                f"SELECT id, type, target_type, target_id FROM recommendations{where}", params
             ).fetchall()
 
             if not rows:

@@ -49,3 +49,5 @@ The tagger can be run from two places:
 - **Recommendations dashboard** — Untagged scenes appear as recommendations; click to tag them
 
 The tagger runs as a background job in the [operation queue](../plugin.md#operation-queue) and supports incremental runs — only scenes modified or added since the last run are processed.
+
+Confidence is the share of a scene's local fingerprints that matched. Filter the list by confidence band or sort it by confidence; **Dismiss All** dismisses only the band being shown. **Accept All High-Confidence** ignores the filter and accepts only matches flagged high-confidence.

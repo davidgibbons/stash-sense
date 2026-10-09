@@ -5,7 +5,7 @@ Endpoints for managing recommendations, running analysis, and configuration.
 """
 
 import logging
-from typing import Optional
+from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -320,6 +320,9 @@ async def list_recommendations(
     target_type: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
+    min_confidence: Optional[float] = None,
+    max_confidence: Optional[float] = None,
+    sort: Literal["newest", "confidence_desc", "confidence_asc"] = "newest",
 ):
     """List recommendations with optional filtering."""
     db = get_rec_db()
@@ -329,6 +332,9 @@ async def list_recommendations(
         target_type=target_type,
         limit=limit,
         offset=offset,
+        min_confidence=min_confidence,
+        max_confidence=max_confidence,
+        sort=sort,
     )
     return RecommendationListResponse(
         recommendations=[
@@ -345,7 +351,10 @@ async def list_recommendations(
             )
             for r in recs
         ],
-        total=db.count_recommendations(status=status, type=type, target_type=target_type),
+        total=db.count_recommendations(
+            status=status, type=type, target_type=target_type,
+            min_confidence=min_confidence, max_confidence=max_confidence,
+        ),
     )
 
 
@@ -1634,6 +1643,8 @@ class BatchDismissRequest(BaseModel):
     """Request to batch dismiss all pending recommendations of a type."""
     type: str = Field(..., description="Recommendation type to dismiss")
     permanent: bool = Field(False, description="If true, never show these again")
+    min_confidence: Optional[float] = Field(None, description="Only dismiss at or above this confidence")
+    max_confidence: Optional[float] = Field(None, description="Only dismiss below this confidence")
 
 
 @router.post("/actions/batch-dismiss")
@@ -1644,5 +1655,7 @@ async def batch_dismiss(request: BatchDismissRequest):
         rec_type=request.type,
         permanent=request.permanent,
         reason="Batch dismissed by user",
+        min_confidence=request.min_confidence,
+        max_confidence=request.max_confidence,
     )
     return {"success": True, "dismissed_count": dismissed_count}

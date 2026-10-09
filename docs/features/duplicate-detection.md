@@ -54,3 +54,5 @@ Duplicate candidates appear on the recommendations dashboard with:
 - **Scene details** — Thumbnails, titles, studios for both scenes
 
 You can dismiss false positives (soft or permanent dismiss) or take action on confirmed duplicates.
+
+Filter the list by confidence band (High 80%+, Medium 60-79%, Low under 60%) or sort it by confidence. **Dismiss All** dismisses only the band being shown.

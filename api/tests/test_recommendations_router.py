@@ -118,6 +118,26 @@ class TestListRecommendations:
         assert len(data["recommendations"]) == 2
         assert data["total"] == 5
 
+    def test_confidence_band_and_sort(self, client, db):
+        _seed_recommendations(db, count=5)  # confidences 0.9 .. 0.5
+        resp = client.get("/recommendations", params={
+            "min_confidence": 0.6, "max_confidence": 0.8, "sort": "confidence_asc",
+        })
+        data = resp.json()
+        assert [round(r["confidence"], 1) for r in data["recommendations"]] == [0.6, 0.7]
+        assert data["total"] == 2
+
+        resp = client.get("/recommendations", params={"sort": "confidence_desc", "limit": 1})
+        assert round(resp.json()["recommendations"][0]["confidence"], 1) == 0.9
+
+    def test_batch_dismiss_respects_confidence_band(self, client, db):
+        _seed_recommendations(db, count=5)  # confidences 0.9 .. 0.5
+        resp = client.post("/recommendations/actions/batch-dismiss", json={
+            "type": "duplicate_performer", "max_confidence": 0.6,
+        })
+        assert resp.json()["dismissed_count"] == 1
+        assert db.count_recommendations(status="pending") == 4
+
     def test_recommendation_response_shape(self, client, db):
         _seed_recommendations(db, count=1)
         resp = client.get("/recommendations")
