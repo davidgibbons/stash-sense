@@ -591,15 +591,13 @@ class StashClientUnified:
         keep_file_id: str,
         all_file_ids: list[str],
     ) -> bool:
-        """
-        Delete specified files from a scene, handling primary file logic.
-        """
-        primary_file_id = all_file_ids[0] if all_file_ids else None
+        """Delete files from a scene, keeping keep_file_id.
 
-        # If we're deleting the primary file, set the keep file as primary first
-        if primary_file_id in file_ids_to_delete:
-            await self.set_scene_primary_file(scene_id, keep_file_id)
-
+        all_file_ids is accepted for API compatibility but unused.
+        """
+        # Stash refuses to delete a primary file. Callers' file order is not
+        # Stash's, so always promote the keeper rather than guess which is primary.
+        await self.set_scene_primary_file(scene_id, keep_file_id)
         return await self.delete_files(file_ids_to_delete)
 
     # ==================== Tags ====================

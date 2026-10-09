@@ -1024,11 +1024,11 @@
                 });
                 done++;
               } catch (e) {
-                failed.push(rec);
+                failed.push(e.message);
               }
             }
             deleteAllFilesBtn.textContent = failed.length
-              ? `${done} deleted, ${failed.length} failed`
+              ? `${done} deleted, ${failed.length} failed: ${failed[0]}`
               : `Done! ${done} deleted`;
             deleteAllFilesBtn.classList.add(failed.length ? 'ss-btn-error' : 'ss-btn-success');
             setTimeout(() => renderCurrentView(document.getElementById('ss-recommendations')), 2000);
